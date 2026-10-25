@@ -1,0 +1,6 @@
+name: Slemon
+description: Palno & Slemon - Contactless Sleep Tracker & Climate Optimizer
+ports: []
+bricks:
+- arduino:web_ui: {}
+icon: 🌙
