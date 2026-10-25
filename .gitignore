@@ -1,0 +1,40 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# SQLite databases & logs
+*.db
+*.db-wal
+*.db-shm
+*.log
+data/sleep_log.db*
+
+# Build artifacts & package archives
+*.zip
+.cache/
+build/
+dist/
+
+# Test & scratch scripts
+patch_*.py
+test_cmd.json
+scratch/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE & Editor settings
+.idea/
+.vscode/
+*.swp
+*.swo
