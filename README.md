@@ -30,7 +30,7 @@ The **Palno & Slemon** ecosystem bridges high-precision contactless sensing with
 
 ```mermaid
 
-
+graph TD
     subgraph Slemon["Slemon Bedside Station (Arduino Uno Q)"]
         Radar["60 GHz mmWave FMCW Radar"] -->|UART| STM32["STM32U585 Real-Time MCU"]
         SHTC3["SHTC3 Temp/Humidity"] -->|I2C| STM32
