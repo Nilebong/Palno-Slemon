@@ -1,193 +1,242 @@
-# Palno & Slemon: Contactless Dual-Core Circadian Sleep Tracking System
+# Palno & Slemon: Contactless Dual-Node Sleep-Tracking System
 
-> **Element14 Design Challenge Entry**  
-> An advanced dual-core sleep monitoring and circadian wake ecosystem combining contactless mmWave radar sensing, an optical PPG/IMU wearable node, multi-stage machine learning sleep classification, National Instruments LabVIEW clinical telemetry streaming, and automated circadian acoustic intervention.
+> **Smart Home and Healthcare Challenge Entry**
+>
+> A prototype sleep-monitoring ecosystem combining contactless mmWave sensing, a wearable PPG/IMU node, experimental sleep-stage estimation, telemetry for NI LabVIEW, a web dashboard, and an optional Bluetooth-audio alarm.
 
----
-
-## 📖 System Overview
-
-The **Palno & Slemon** ecosystem bridges high-precision contactless sensing with wearable optical and inertial tracking to achieve clinical-grade sleep quality analysis without compromising user comfort:
-
-1. **Slemon Bedside Station (Arduino Uno Q):**
-   - **STM32U585 MCU (Cortex-M33):** Interfaces with high-frequency 60 GHz mmWave radar for non-contact respiration tracking, SHTC3 ambient temperature sensing, and real-time E-ink sleep stage visualization.
-   - **Qualcomm QRB2210 Linux MPU (Quad-core A53):** Runs containerized Python microservices orchestrating adaptive baseline respiration detection, 5-stage epoch classification (WAKE, N1, N2, N3, REM), circadian binaural beat synthesis, and an NI LabVIEW TCP broadcast bridge.
-   - **RouterBridge RPC:** Inter-processor RPC bridge passing sensor frames and display rendering commands between the real-time MCU and the application MPU.
-
-2. **Palno Wearable Node (ESP32-WROOM DA):**
-   - **MAX30102 Optical PPG:** Continuous 100-sample sliding window collecting photoplethysmogram data at 25 SPS for real-time Heart Rate (BPM) and Blood Oxygen Saturation (SpO2 %).
-   - **MPU6050 3-Axis IMU:** Samples acceleration and angular velocity at 50 Hz for restlessness scoring and inertial shake-to-dismiss smart alarm dismissal.
-   - **BLE GATT Server:** Streams biometric and motion packets at 1 Hz and 20 Hz to Slemon over an isolated BLE GATT link.
-
-3. **Clinician Telemetry & Audio Synthesis:**
-   - **NI LabVIEW TCP Socket (Port 5005):** Streams real-time, strictly scalar, unflatten-ready JSON packets formatted for immediate ingestion into LabVIEW Type Clusters.
-   - **Interactive Web Dashboard (Port 7000):** Responsive HTML5/Socket.IO application with rolling Chart.js vitals charts, hypnogram progression, and hardware pairing management.
-   - **A2DP Bluetooth Audio Speaker:** Automatically pairs with high-fidelity Bluetooth speakers (e.g. ZEBRONICS) to deliver phased sleep-induction soundscapes and gentle circadian wake-up audio.
+> **Prototype and safety notice:** This project is for experimentation and wellness-oriented trend tracking. It is not a medical device, does not diagnose sleep disorders, and has not been established as clinical-grade. MAX30102 SpO₂ values are estimates and may be inaccurate due to motion, fit, perfusion, ambient light, or sensor limitations. Do not use this system for medical decisions.
 
 ---
 
-## 🏛 System Architecture
+## Contents
+
+- [System overview](#system-overview)
+- [Architecture](#architecture)
+- [Hardware and wiring](#hardware-and-wiring)
+- [Repository layout](#repository-layout)
+- [Setup and installation](#setup-and-installation)
+- [Telemetry and LabVIEW](#telemetry-and-labview)
+- [Sleep-stage estimation](#sleep-stage-estimation)
+- [Smart alarm](#smart-alarm)
+- [Known limitations and validation checklist](#known-limitations-and-validation-checklist)
+- [License and acknowledgments](#license-and-acknowledgments)
+
+## System overview
+
+Palno & Slemon is a proposed two-node prototype. The exact features available depend on the hardware revisions, firmware, Linux image, drivers, and software implemented in the repository.
+
+### 1. Slemon bedside station — Arduino Uno Q
+
+Intended responsibilities:
+
+- Read a compatible 60 GHz mmWave radar module over UART.
+- Read an SHTC3 temperature/humidity sensor over I²C.
+- Render status and estimated sleep information on an e-ink display, if the selected display and driver are supported.
+- Run the higher-level Python application on the Linux processor, where supported by the installed Arduino Uno Q software environment.
+- Provide telemetry to a web dashboard and an optional LabVIEW TCP client.
+
+**Architecture verification required:** confirm the exact processor names, board communication mechanism, and supported App Lab deployment format against the documentation for your Uno Q hardware and installed software version. Do not assume that a generic RouterBridge RPC interface, arbitrary Docker configuration, or direct STM32 peripheral access is available unless the board software exposes it.
+
+### 2. Palno wearable node — ESP32-WROOM-DA
+
+Intended responsibilities:
+
+- Read MAX30102 red/infrared PPG samples over I²C.
+- Read MPU6050 accelerometer and gyroscope samples over the same I²C bus.
+- Calculate experimental heart-rate and SpO₂ estimates from sufficiently good PPG windows.
+- Calculate motion/restlessness features from IMU samples.
+- Publish data through a BLE GATT service.
+
+The MAX30102 and MPU6050 share SDA/SCL but use different I²C addresses in the usual configuration: `0x57` and `0x68`. Verify the actual addresses with an I²C scanner. Both modules must use compatible logic levels and a common ground.
+
+### 3. Telemetry, dashboard, and audio
+
+- **LabVIEW TCP:** optional newline-delimited JSON telemetry. The server and client must agree on the port, line terminator, field names, and data types.
+- **Web dashboard:** optional browser UI using a web server and WebSocket/Socket.IO transport. The server implementation must match the JavaScript client and its dependencies.
+- **Bluetooth audio:** optional audio output through a paired Bluetooth Classic A2DP speaker. BLE GATT sensor communication does not itself provide A2DP audio; the Linux host must support the relevant Bluetooth profiles and audio stack.
+
+---
+
+## Architecture
+
+The following is a **logical architecture**, not proof that every link is already implemented. Replace component labels or links to match the actual board and source code.
 
 ```mermaid
-
-graph TD
-    subgraph Slemon["Slemon Bedside Station (Arduino Uno Q)"]
-        Radar["60 GHz mmWave FMCW Radar"] -->|UART| STM32["STM32U585 Real-Time MCU"]
-        SHTC3["SHTC3 Temp/Humidity"] -->|I2C| STM32
-        STM32 -->|SPI| EINK["E-ink Display (Vitals & Stages)"]
-        
-        STM32 <===>|RouterBridge RPC| LinuxMPU["Qualcomm QRB2210 Linux MPU (Docker)"]
-        
-        subgraph LinuxEngine["Python App Architecture"]
-            BLE_GATT -->|D-Bus Socket Proxy| BLE_Client["engine/ble_client.py (Bleak)"]
-            BLE_Client --> AppCore["main.py (SlemonApp Core)"]
-            
-            AppCore --> Breath["engine/breath_engine.py (Respiration)"]
-            AppCore --> StageML["engine/sleep_classifier.py (Epochs)"]
-            AppCore --> Alarm["engine/alarm_manager.py (Circadian Audio)"]
-            AppCore --> DB["engine/data_logger.py (SQLite WAL)"]
-        end
+flowchart TD
+    subgraph Wearable["Palno wearable — ESP32"]
+        PPG["MAX30102 PPG sensor"] --> ESP["ESP32 firmware"]
+        IMU["MPU6050 IMU"] --> ESP
+        ESP --> BLE["BLE GATT notifications"]
     end
 
-    subgraph Telemetry["Clinician & User Interfaces"]
-        AppCore ==>|"TCP Port 5005 (Scalar JSON)"| LabVIEW["NI LabVIEW TCP Telemetry VI"]
-        AppCore -->|"WebSocket Port 7000"| WebUI["Responsive Web Dashboard (Chart.js)"]
-        Alarm -->|"Bluetooth Classic A2DP"| Speaker["ZEBRONICS A2DP Bluetooth Speaker"]
+    subgraph Bedside["Slemon bedside station"]
+        RADAR["60 GHz mmWave radar"] --> MCU["Supported MCU interface / firmware"]
+        ENV["SHTC3 temperature and humidity"] --> MCU
+        MCU --> APP["Linux application, if supported by board image"]
+        BLE --> APP
+        APP --> RESP["Respiration feature extraction"]
+        APP --> STAGE["Experimental sleep-stage estimator"]
+        APP --> LOG["Local data logging"]
+        APP --> DASH["Web dashboard service"]
+        APP --> TCP["Optional TCP JSON telemetry"]
+        APP --> AUDIO["Optional alarm/audio manager"]
+        MCU --> DISPLAY["E-ink display, if supported"]
     end
----
 
-## 🔌 Hardware Bill of Materials (BOM) & Pinout
-
-### 1. Palno Wearable Node (ESP32)
-| Component | Function | Interface | ESP32 Pin Connection |
-| :--- | :--- | :--- | :--- |
-| **ESP32-WROOM DA** | Node Microcontroller & BLE | BLE 4.2 / I2C | — |
-| **MAX30102** | Optical PPG (Heart Rate & SpO2) | I2C (Addr: `0x57`) | `SDA -> GPIO 21`, `SCL -> GPIO 22`, `INT -> GPIO 4`, `VIN -> 3.3V` |
-| **MPU6050** | 3-Axis Accelerometer & Gyro | I2C (Addr: `0x68`) | `SDA -> GPIO 21`, `SCL -> GPIO 22`, `VCC -> 3.3V`, `GND -> GND` |
-| **Status LED** | Heartbeat Indicator | GPIO Output | `GPIO 2` (Onboard LED) |
-
-### 2. Slemon Bedside Hub (Arduino Uno Q)
-| Peripheral | Function | Connection |
-| :--- | :--- | :--- |
-| **Qualcomm QRB2210** | Quad-core A53 Linux MPU (Debian / Docker) | Internal Board Hub |
-| **STM32U585** | ARM Cortex-M33 MCU Sensor Co-processor | Internal RouterBridge RPC |
-| **60 GHz mmWave Radar** | Contactless Respiration & Movement Energy | `UART TX/RX` to STM32 |
-| **SHTC3 Sensor** | Ambient Bedroom Temperature & Humidity | `I2C` to STM32 |
-| **E-ink Display** | Low-power Local Sleep Vitals Display | `SPI` to STM32 |
-| **ZEBRONICS Speaker** | Binaural Beat Alarm & Induction Audio | Bluetooth Classic A2DP (`30:21:44:62:2C:58`) |
-
----
-
-## 📂 Repository Structure
-
-```text
-├── Palno/                             # ESP32 Wearable Node Source Code
-│   └── palno_esp32/
-│       ├── palno_esp32.ino            # Main Arduino setup & multi-rate scheduling
-│       ├── ble_service.h              # BLE GATT server, UUIDs & Notify callbacks
-│       ├── biometrics.h               # MAX30102 sliding window & outlier filter
-│       ├── motion.h                   # MPU6050 burst reads & shake detector
-│       ├── algorithm.h / .cpp         # Maxim optical pulse oximetry algorithm
-│       └── max30102.h / .cpp          # Register-level I2C MAX30102 driver
-│
-├── sketch/                            # Arduino Uno Q STM32 MCU Firmware
-│   ├── sketch.ino                     # STM32 FreeRTOS sensor polling & display RPC
-│   ├── radar_parser.h                 # 60 GHz mmWave radar packet decoder
-│   ├── eink_display.h                 # E-ink layout renderer (Sleep stages, vitals)
-│   ├── temp_sensor.h                  # SHTC3 temperature & humidity driver
-│   └── sketch.yaml                    # Arduino CLI build manifest
-│
-├── python/                            # Arduino Uno Q Linux MPU Application
-│   ├── main.py                        # SlemonApp Core, WebUI & 10 Hz Telemetry Worker
-│   ├── requirements.txt               # Dependencies (bleak, dbus-fast, fastapi)
-│   └── engine/
-│       ├── ble_client.py              # Asynchronous BLE GATT client with auto-reconnect
-│       ├── breath_engine.py           # Adaptive baseline mmWave respiration extractor
-│       ├── sleep_classifier.py        # 30-second epoch sleep stage classifier (WAKE/N1/N2/N3/REM)
-│       ├── labview_bridge.py          # 10 Hz NI LabVIEW TCP broadcast socket server
-│       ├── alarm_manager.py           # Circadian sleep-induction & binaural beat audio
-│       ├── bluetooth_manager.py       # Host D-Bus & BlueZ pairing orchestrator
-│       ├── data_logger.py             # SQLite WAL database & CSV exporter
-│       ├── serial_bridge.py           # Fallback serial telemetry bridge
-│       └── config.py                  # System thresholds, MACs & tuning parameters
-│
-├── assets/                            # Responsive Web Dashboard (Port 7000)
-│   ├── index.html                     # Clean dark-mode dashboard UI
-│   ├── style.css                      # Modern responsive CSS grid & animations
-│   ├── app.js                         # Socket.IO telemetry subscriber & Chart.js renderer
-│   ├── libs/                          # Local JS libraries (socket.io, arduino.js)
-│   └── fonts/                         # Offline Roboto & Open Sans web fonts
-│
-├── audio/                             # Binaural & Circadian Soundscapes
-│   ├── sleep_induction_delta.wav      # 0.5-4 Hz delta waves for deep sleep induction
-│   └── wake_circadian_alpha.wav       # 8-12 Hz alpha waves for gentle awakening
-│
-├── slemon_startup.sh                  # Host boot script (Bluetooth power, D-Bus, port forwards)
-├── bt_host_agent.py                   # Host-level Bluetooth Classic audio management service
-├── app.yaml                           # Arduino Uno Q App Lab container configuration
-├── LICENSE                            # Open Source License (Apache 2.0 / MIT)
-└── README.md                          # Comprehensive project documentation
+    TCP --> LV["NI LabVIEW TCP client"]
+    DASH --> WEB["Browser dashboard"]
+    AUDIO --> SPK["Bluetooth Classic A2DP speaker"]
 ```
 
 ---
 
-## 🚀 Setup & Installation Guide
+## Hardware and wiring
 
-### Step 1: Flash the Palno Wearable Node (ESP32)
-1. Open the [Arduino IDE](https://www.arduino.cc/en/software).
-2. Install the **ESP32 by Espressif Systems** board package (`Tools -> Board -> Boards Manager`).
-3. Open [`Palno/palno_esp32/palno_esp32.ino`](Palno/palno_esp32/palno_esp32.ino).
-4. Select your ESP32 board and COM port.
-5. Compile and upload. The board will begin advertising as `Palno-ESP32` (`UUID: a1b2c3d4-e5f6-7890-abcd-ef1234567890`).
+### 1. Palno wearable node (ESP32-WROOM-DA)
 
-### Step 2: Deploy to Arduino Uno Q via App Lab
-1. Compress the project folder into a ZIP file:
-   - Ensure `app.yaml`, `python/`, `assets/`, and `sketch/` are in the root of the archive.
-2. Open the **Arduino App Lab** web interface on your local network:
-   ```text
-   http://uno-q.local/ or http://192.168.1.12/
-   ```
-3. Upload the ZIP package. App Lab compiles the STM32 sketch onto the real-time MCU and spins up the Python container on the Qualcomm MPU.
+| Component | Interface | ESP32 connection | Notes |
+|---|---|---|---|
+| ESP32-WROOM-DA | — | — | Confirm the exact development-board pin labels. |
+| MAX30102 | I²C | SDA → GPIO 21; SCL → GPIO 22; INT → GPIO 4 (optional); VIN → module-supported supply | I²C address is commonly `0x57`. Check the breakout board's voltage and pull-up circuitry before powering it. |
+| MPU6050 | I²C | SDA → GPIO 21; SCL → GPIO 22; VCC → module-supported supply; GND → GND | Address is commonly `0x68`, or `0x69` when AD0 is high. |
+| Status LED | GPIO | GPIO 2, if available on the development board | LED polarity and onboard wiring vary by board. |
 
-### Step 3: Zero-Touch Boot Configuration (Linux Host)
-The system automatically orchestrates all dependencies across reboots without requiring any terminal intervention:
-- **`dbus-proxy.service`**: Dynamically binds the Linux D-Bus socket into the active container for Bleak BLE access.
-- **`labview-forward.service`**: Dynamically discovers the active container IP and forwards TCP port `5005` to the host.
-- **`bt-host-agent.service`**: Background daemon handling Classic Bluetooth A2DP pairing for the audio speaker.
-- **`slemon-startup.service`**: Runs [`slemon_startup.sh`](slemon_startup.sh) on boot to power up Bluetooth, verify container restart policies, and trigger speaker auto-connection.
+**Wiring checks**
+
+1. Connect all grounds together.
+2. Ensure the I²C pull-ups do not pull the bus above the ESP32's permitted GPIO voltage.
+3. Check the actual module supply requirements; do not assume every breakout accepts 3.3 V or 5 V.
+4. Use an I²C scanner before running the application.
+5. Start with a lower I²C clock if wiring is long or unreliable.
+
+### 2. Slemon bedside station (Arduino Uno Q)
+
+| Peripheral | Intended interface | Required verification |
+|---|---|---|
+| mmWave radar | UART | Confirm the radar model, baud rate, voltage levels, packet format, and supported MCU pins. |
+| SHTC3 | I²C | Confirm the selected I²C bus, address, and compatible library. |
+| E-ink display | Usually SPI, depending on the display | Confirm controller, resolution, voltage, reset/busy pins, and supported driver. |
+| Linux application | Board-supported IPC | Use the inter-processor communication interface documented for the installed Uno Q image. |
+| Bluetooth speaker | Bluetooth Classic A2DP | Confirm that the Linux image and audio stack support A2DP sink/source roles as required by the speaker workflow. |
+
+The speaker MAC address, radar model, pin assignments, and processor/interface names should be documented only after they have been verified on the actual hardware.
 
 ---
 
-## 📊 NI LabVIEW Integration
+## Repository layout
 
-The Slemon station broadcasts live telemetry on **TCP Port 5005** at 10 Hz formatted as a clean, single-line UTF-8 scalar JSON string terminated by `\r\n`.
+This is a suggested layout. Keep only files and services that exist in the repository; a README should not imply that unimplemented modules are available.
 
-### Connecting in LabVIEW:
-1. Place **`TCP Open Connection.vi`** on your block diagram.
-   - **Address:** `127.0.0.1` (via USB / ADB) or `192.168.1.12` (via Wi-Fi)
-   - **Port:** `5005`
-2. In a While Loop, use **`TCP Read.vi`** with `mode = 1` (CRLF / standard line read).
-3. Wire the incoming string to **`Unflatten From JSON.vi`**.
-4. Wire a Type Cluster containing the exact fields below:
+```text
+.
+├── Palno/
+│   └── palno_esp32/
+│       ├── palno_esp32.ino
+│       ├── ble_service.h
+│       ├── biometrics.h
+│       ├── motion.h
+│       ├── algorithm.h
+│       ├── algorithm.cpp
+│       ├── max30102.h
+│       └── max30102.cpp
+├── sketch/
+│   ├── sketch.ino
+│   ├── radar_parser.h
+│   ├── eink_display.h
+│   ├── temp_sensor.h
+│   └── sketch.yaml
+├── python/
+│   ├── main.py
+│   ├── requirements.txt
+│   └── engine/
+│       ├── ble_client.py
+│       ├── breath_engine.py
+│       ├── sleep_classifier.py
+│       ├── labview_bridge.py
+│       ├── alarm_manager.py
+│       ├── bluetooth_manager.py
+│       ├── data_logger.py
+│       ├── serial_bridge.py
+│       └── config.py
+├── assets/
+│   ├── index.html
+│   ├── style.css
+│   └── app.js
+├── audio/
+│   ├── sleep_induction_delta.wav
+│   └── wake_circadian_alpha.wav
+├── slemon_startup.sh
+├── bt_host_agent.py
+├── app.yaml
+├── LICENSE
+└── README.md
+```
+
+---
+
+## Setup and installation
+
+These steps are a starting checklist. Exact steps depend on the repository contents and the Arduino Uno Q software version.
+
+### Step 1: Build and flash the ESP32
+
+1. Install the [Arduino IDE](https://www.arduino.cc/en/software).
+2. Install the **ESP32 by Espressif Systems** board package through Boards Manager.
+3. Open `Palno/palno_esp32/palno_esp32.ino`.
+4. Select the correct ESP32 board and serial port.
+5. Install any libraries required by the source code and confirm their versions.
+6. Compile and upload the firmware.
+7. Open Serial Monitor and verify sensor detection, PPG signal quality, IMU readings, and BLE advertising.
+
+The advertised device name and service UUID must match the values actually defined in `ble_service.h`; do not rely on example UUIDs unless they are configured in the firmware.
+
+### Step 2: Deploy the Slemon application
+
+1. Check the current Arduino Uno Q documentation for the supported App Lab workflow and project format.
+2. Verify the project manifest and required files before packaging.
+3. Install Python dependencies in the environment supported by the board.
+4. Configure BLE access, sensor interfaces, data storage, and network binding.
+5. Start the application and inspect logs before configuring automatic startup.
+
+Do not assume that uploading an arbitrary ZIP automatically compiles an MCU sketch, starts a Docker container, or installs Linux system services. Those behaviors must be supported by the installed board software and explicitly configured.
+
+### Step 3: Configure networking and services
+
+Before enabling startup services, confirm that each script and service exists and works when launched manually.
+
+- **BLE access:** verify that BlueZ is running and that the Python BLE library can access the host Bluetooth adapter. Containerized deployments may need a documented D-Bus/socket access configuration.
+- **TCP telemetry:** ensure port `5005` is listening on the intended interface and is reachable from the LabVIEW machine. Bind to loopback if remote access is not required; otherwise restrict access with firewall rules.
+- **Dashboard:** ensure port `7000` is listening on the intended interface and that the front end and server use compatible Socket.IO versions.
+- **Bluetooth audio:** verify the host's Bluetooth audio support and test manual pairing and playback before enabling automatic connection.
+- **Startup:** only enable systemd units after confirming their paths, permissions, dependencies, restart behavior, and logs.
+
+Do not expose telemetry ports to untrusted networks without access controls. Biometric data should be treated as sensitive personal data.
+
+---
+
+## Telemetry and LabVIEW
+
+The proposed TCP interface sends one JSON object per line, terminated by `\n` or `\r\n`. Pick one line ending and use it consistently on both ends. TCP is a byte stream, so a client must buffer incoming bytes until a complete line is received; a single read is not guaranteed to return exactly one JSON message.
+
+### Example JSON message
+
+This is an **illustrative schema**, not a claim that the application currently produces these values.
 
 ```json
 {
   "ts": 1792931468.36,
   "breath_bpm": 15.0,
-  "hr_bpm": 71,
-  "heart_rate": 71,
-  "hr_valid": 1,
-  "spo2": 98,
-  "spo2_valid": 1,
+  "hr_bpm": 71.0,
+  "hr_valid": true,
+  "spo2": 98.0,
+  "spo2_valid": true,
   "room_temp_c": 28.27,
-  "temp_c": 28.27,
   "disturbance": 9.2,
   "sleep_stage": "WAKE",
-  "stage": "WAKE",
   "sleep_stage_numeric": 4,
   "alarm_active": false,
   "ble_connected": true,
-  "sleep_score": 85,
+  "sleep_score": 85.0,
   "radar_mov_dist": 69.0,
   "radar_mov_energy": 0.0,
   "radar_stat_energy": 100.0,
@@ -197,21 +246,101 @@ The Slemon station broadcasts live telemetry on **TCP Port 5005** at 10 Hz forma
 }
 ```
 
-> [!TIP]
-> **Numeric Sleep Stage Mapping:**  
-> `0 = N3 (Deep Sleep)` | `1 = N2 (Light Sleep)` | `2 = REM (Dream Sleep)` | `3 = N1 (Dozing)` | `4 = WAKE`
+### Field and type rules
+
+- `ts`: Unix timestamp in seconds; document whether it is UTC and how the clock is synchronized.
+- `*_valid`: Boolean validity flags. Use `true`/`false` consistently rather than mixing Booleans and integer flags.
+- Missing or invalid measurements should be represented consistently, for example with `null` plus a validity flag. Do not silently replace bad SpO₂ or heart-rate readings with a moving average and present them as valid measurements.
+- Use one canonical field for each quantity. If backwards compatibility requires aliases such as `heart_rate` or `stage`, document them and keep them synchronized.
+- Define units for every field and keep them stable.
+- Define the numeric stage mapping in one place and use it consistently in firmware, Python, dashboard, and LabVIEW.
+
+### Suggested stage encoding
+
+| Numeric value | Label |
+|---:|---|
+| 0 | N3 |
+| 1 | N2 |
+| 2 | REM |
+| 3 | N1 |
+| 4 | WAKE |
+| `null` | Unknown / insufficient data |
+
+This encoding is project-specific, not a standard sleep-scoring convention.
+
+### LabVIEW client checklist
+
+1. Use `TCP Open Connection` with the server's actual reachable IP address and port.
+2. Read bytes in a loop and assemble complete lines using the agreed line terminator.
+3. Parse each line as JSON using a JSON parser available in your LabVIEW version/toolkit.
+4. Convert values to the intended LabVIEW types explicitly. JSON numbers may be parsed as floating-point values even when a field appears integer-like.
+5. Handle absent keys, `null`, invalid JSON, disconnects, and timeouts.
+6. Close the TCP connection when the loop exits.
+
+Do not assume `127.0.0.1` refers to the Uno Q from a separate computer. Loopback always refers to the machine on which LabVIEW is running. Use the actual server address or a documented USB/ADB port-forwarding arrangement.
 
 ---
 
-## ⏰ Circadian Smart Alarm & Shake-to-Dismiss
+## Sleep-stage estimation
 
-- **Circadian Wake Window:** The user sets a target wake time (e.g. `07:00`) and window (e.g. `30 min`). Slemon evaluates sleep stages in real-time, activating the gentle wake alarm only when the user transitions into light sleep (N1/N2) within the window.
-- **Inertial Shake Dismissal:** To eliminate morning button-fumbling, the alarm requires **10 vigorous hand shakes** (`MPU6050 dyn_accel > 0.40 G`). The system counts shakes in parallel on both the ESP32 and the Uno Q motion engine, instantly silencing the alarm upon reaching 10 shakes.
+A five-class output (`WAKE`, `N1`, `N2`, `N3`, `REM`) should be described as **experimental sleep-stage estimation** unless it has been validated against an accepted reference such as polysomnography (PSG).
+
+Respiration, motion, heart rate, and SpO₂ alone do not establish clinically reliable five-stage sleep scoring. If a model is used, document:
+
+- the training dataset and its permissions;
+- input features and epoch duration;
+- preprocessing and missing-data handling;
+- model type, version, and inference thresholds;
+- subject-independent evaluation method;
+- per-class precision/recall, confusion matrix, and limitations.
+
+Without a trained and evaluated model, report sleep-related features or a coarse rest/activity estimate rather than claiming accurate N1/N2/N3/REM classification. A 30-second epoch is common in sleep scoring, but epoch length alone does not make a classifier valid.
 
 ---
 
-## 📄 License & Acknowledgments
+## Smart alarm
 
-- Developed for the **Element14 Design Challenge 2026**.
-- Open source under the [GNU General Public License v3.0].
-- Includes the Maxim Integrated MAX30102 pulse oximetry algorithm.
+The intended behavior is to select a wake-up time and a wake window, then optionally trigger an alarm when the estimated state meets configured criteria.
+
+- Treat stage-based wake selection as experimental and provide a fixed-time fallback.
+- Make alarm volume, quiet hours, timeout, and manual dismissal configurable.
+- Ensure that loss of BLE, invalid sensor data, or a classifier failure cannot prevent the alarm from sounding at the fallback time.
+- Shake-to-dismiss should use calibrated motion features and a configurable threshold. A fixed `0.40 G` threshold may behave differently across users and device placements; validate it with real recordings and reject repeated noisy threshold crossings.
+- Count shake events once in a single authoritative component. Counting independently on both devices can cause double counting or inconsistent alarm state.
+
+Binaural beats or other audio patterns should not be described as proven sleep-induction treatment. Their effects vary, and audio must be played at a safe volume.
+
+---
+
+## Known limitations and validation checklist
+
+Before calling the system complete, verify each item on the actual hardware:
+
+- [ ] Confirm board processor names and supported MCU/Linux communication method.
+- [ ] Confirm radar model, UART protocol, baud rate, and parser behavior with recorded packets.
+- [ ] Confirm SHTC3 and e-ink drivers, wiring, and display refresh behavior.
+- [ ] Scan I²C and verify MAX30102 and MPU6050 addresses.
+- [ ] Check PPG signal quality and motion artefacts before reporting HR/SpO₂ estimates.
+- [ ] Compare sensor estimates against suitable reference equipment; do not claim clinical accuracy without a defined validation study.
+- [ ] Test BLE connection, notifications, reconnects, and packet-loss handling.
+- [ ] Verify JSON framing, types, units, and LabVIEW parsing with malformed and partial packets.
+- [ ] Verify dashboard/server dependency compatibility and network access controls.
+- [ ] Test manual A2DP pairing and playback before attempting automatic connection.
+- [ ] Test alarm fallback when BLE, radar, audio, or the classifier is unavailable.
+- [ ] Confirm every file, script, service, port, and setup step in this README exists and works.
+- [ ] Choose one license and ensure all included third-party code and assets are compatible with it.
+
+---
+
+## License and acknowledgments
+
+Choose and include **one clearly defined project license** in `LICENSE`, and make the README match it. The original description mentioned both Apache-2.0/MIT and GPL-3.0; these are not interchangeable labels. If the project incorporates third-party code, preserve its license notices and check compatibility before redistributing it.
+
+Potential acknowledgments, where applicable:
+
+- Arduino and Espressif toolchains and documentation.
+- The MAX30102 and MPU6050 documentation and any libraries used.
+- The selected radar and e-ink display vendors.
+- NI LabVIEW and any JSON parsing library used.
+
+Update this section with the exact libraries, authors, versions, and license notices included in the final build.
