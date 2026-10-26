@@ -29,12 +29,7 @@ The **Palno & Slemon** ecosystem bridges high-precision contactless sensing with
 ## 🏛 System Architecture
 
 ```mermaid
-flowchart TD
-    subgraph Wearable["Palno Wearable Node (ESP32)"]
-        PPG["MAX30102 (HR + SpO2)"] -->|I2C 400kHz| ESP32["ESP32-WROOM DA"]
-        IMU["MPU6050 (3-Axis Accel/Gyro)"] -->|I2C 400kHz| ESP32
-        ESP32 -->|BLE GATT Notify (1Hz / 20Hz)| BLE_GATT["BLE GATT Server (UUID: a1b2c3d4...)"]
-    end
+
 
     subgraph Slemon["Slemon Bedside Station (Arduino Uno Q)"]
         Radar["60 GHz mmWave FMCW Radar"] -->|UART| STM32["STM32U585 Real-Time MCU"]
@@ -220,5 +215,5 @@ The Slemon station broadcasts live telemetry on **TCP Port 5005** at 10 Hz forma
 ## 📄 License & Acknowledgments
 
 - Developed for the **Element14 Design Challenge 2026**.
-- Open source under the [Apache License 2.0](LICENSE).
+- Open source under the [GNU General Public License v3.0].
 - Includes the Maxim Integrated MAX30102 pulse oximetry algorithm.
