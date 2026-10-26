@@ -28,8 +28,6 @@ The **Palno & Slemon** ecosystem bridges high-precision contactless sensing with
 
 ## 🏛 System Architecture
 
-```mermaid
-
 graph TD
     subgraph Slemon["Slemon Bedside Station (Arduino Uno Q)"]
         Radar["60 GHz mmWave FMCW Radar"] -->|UART| STM32["STM32U585 Real-Time MCU"]
@@ -50,12 +48,10 @@ graph TD
     end
 
     subgraph Telemetry["Clinician & User Interfaces"]
-        AppCore -->|TCP Port 5005 (Scalar JSON)| LabVIEW["NI LabVIEW TCP Telemetry VI"]
-        AppCore -->|WebSocket Port 7000| WebUI["Responsive Web Dashboard (Chart.js)"]
-        Alarm -->|Bluetooth Classic A2DP| Speaker["ZEBRONICS A2DP Bluetooth Speaker"]
+        AppCore ==>|"TCP Port 5005 (Scalar JSON)"| LabVIEW["NI LabVIEW TCP Telemetry VI"]
+        AppCore -->|"WebSocket Port 7000"| WebUI["Responsive Web Dashboard (Chart.js)"]
+        Alarm -->|"Bluetooth Classic A2DP"| Speaker["ZEBRONICS A2DP Bluetooth Speaker"]
     end
-```
-
 ---
 
 ## 🔌 Hardware Bill of Materials (BOM) & Pinout
